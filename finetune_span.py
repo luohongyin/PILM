@@ -6,9 +6,9 @@ np.random.seed(331)
 import torch
 import torch.nn as nn
 
+import tcn
 import data
 import model
-
 from utils import batchify, get_batch, repackage_hidden
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
@@ -48,6 +48,8 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--nonmono', type=int, default=5,
                     help='random seed')
+parser.add_argument('--ns', action='store_false',
+                    help='use negative sampling')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
@@ -55,6 +57,8 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default=randomhash+'.pt',
                     help='path to save the final model')
+parser.add_argument('--theta', type=float, default=.5,
+                    help='theta makes the model learn skip-word dependency in decoding (theta = 0 means no regularization)')
 parser.add_argument('--alpha', type=float, default=2,
                     help='alpha L2 regularization on RNN activation (alpha = 0 means no regularization)')
 parser.add_argument('--beta', type=float, default=1,
@@ -86,11 +90,27 @@ test_data = batchify(corpus.test, test_batch_size, args)
 ###############################################################################
 # Build the model
 ###############################################################################
+with open('models/{}.pt'.format(args.save), 'rb') as f:
+    model, model_r, model_mlp, _, _ = torch.load(f)
 
 ntokens = len(corpus.dictionary)
+'''
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
+model_r = tcn.TCN(args.emsize, args.nhid, 5, 1, 1)
+model_mlp = nn.Sequential(
+        nn.Linear(args.emsize, args.nhid),
+        # nn.ReLU(),
+        nn.Dropout(0.5),
+        # nn.Linear(args.nhid, args.nhid),
+        # nn.ReLU(),
+        # nn.Dropout(0.5)
+    )
+'''
+
 if args.cuda:
     model.cuda()
+    model_r.cuda()
+    model_mlp.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
 print('Args:', args)
 print('Model total parameters:', total_params)
@@ -136,7 +156,11 @@ def train():
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
         model.train()
+        model_r.train()
+        model_mlp.train()
         data, targets, _ = get_batch(train_data, i, args, seq_len=seq_len)
+        data_long, _, _ = get_batch(train_data, i, args, seq_len=seq_len)
+        seq_len_data = data.size(0)
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
@@ -145,6 +169,20 @@ def train():
 
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
         output = model.decoder(output)
+        
+        input_emb = model.encoder(data)
+        # input_emb = model.encoder(data).detach()
+        # input_emb = model.encoder(data_long)
+        # input_emb = model.encoder(data_long).detach()
+        
+        # input_emb_nhid = model_mlp(input_emb)
+
+        attention, seq_len_data, reg_len = model_r(input_emb, seq_len_data)
+        span_emb = (input_emb.unsqueeze(0) * attention).sum(1)
+        # span_emb = (input_emb_nhid.unsqueeze(0) * attention).sum(1)
+
+        span_emb = model_mlp(span_emb)
+
         raw_loss = criterion(output.view(-1, ntokens), targets)
 
         loss = raw_loss
@@ -152,6 +190,37 @@ def train():
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
+        
+        context_emb = dropped_rnn_hs[-2][:seq_len_data]
+        if args.ns:
+            span_emb_t = span_emb.transpose(0, 1)
+            pos_loss = (1 - (context_emb * span_emb).sum(2).sigmoid()).mean()
+            neg_loss = 0
+            
+            split_idx_batch = int(torch.randint(args.batch_size, []))
+            # split_idx_batch = int(torch.randint(1, args.batch_size, []))
+            least_ns_seq = 0
+            if split_idx_batch == 0:
+                least_ns_seq = 10 if data.size(0) > 15 else int(data.size(0) / 2)
+            split_idx_seq = int(torch.randint(least_ns_seq, data.size(0), []))
+
+            for j in range(1):
+                span_emb_neg = torch.cat([span_emb_t[split_idx_batch:], span_emb_t[:split_idx_batch]], 0).transpose(0, 1)
+                span_emb_neg = torch.cat([span_emb_neg[split_idx_seq:], span_emb_neg[:split_idx_seq]], 0)
+                neg_loss += (context_emb * span_emb_neg).sum(2).sigmoid().mean()
+                
+                # split_idx_batch = int(torch.randint(args.batch_size, []))
+                # split_idx_batch = int(torch.randint(1, args.batch_size, []))
+                # least_ns_seq = 0
+                # if split_idx_batch == 0:
+                #     least_ns_seq = 10 if data.size(0) > 15 else int(data.size(0) / 2)
+                # split_idx_seq = int(torch.randint(least_ns_seq, data.size(0), []))
+
+            loss += args.theta * (pos_loss + neg_loss)# + 1e-6 * reg_len
+
+        else:
+            loss = loss + args.theta * (context_emb - span_emb).pow(2).mean()
+        
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -175,8 +244,8 @@ def train():
 
 
 # Load the best saved model.
-with open('models/{}.pt'.format(args.save), 'rb') as f:
-    model,_ ,_, _, _ = torch.load(f)
+# with open('models/{}.pt'.format(args.save), 'rb') as f:
+#     model, model_r, model_mlp, _, _ = torch.load(f)
 
 
 # Loop over epochs.
@@ -186,13 +255,14 @@ best_val_loss = []
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     #optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
-    optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
+    optimizer = torch.optim.ASGD(list(model.parameters()) + list(model_r.parameters()) + list(model_mlp.parameters()),
+            lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
         if 't0' in optimizer.param_groups[0]:
             tmp = {}
-            for prm in model.parameters():
+            for prm in list(model.parameters()) + list(model_r.parameters()) + list(model_mlp.parameters()):
                 tmp[prm] = prm.data.clone()
                 prm.data = optimizer.state[prm]['ax'].clone()
 
@@ -209,7 +279,7 @@ try:
                 print('Saving Averaged!')
                 stored_loss = val_loss2
 
-            for prm in model.parameters():
+            for prm in list(model.parameters()) + list(model_r.parameters()) + list(model_mlp.parameters()):
                 prm.data = tmp[prm].clone()
 
         if (len(best_val_loss)>args.nonmono and val_loss2 > min(best_val_loss[:-args.nonmono])):
@@ -217,7 +287,8 @@ try:
             break
             # import sys
             # sys.exit(1)
-            optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
+            optimizer = torch.optim.ASGD(list(model.parameters()) + list(model_r.parameters()) + list(model_mlp.parameters()),
+                    lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
             #optimizer.param_groups[0]['lr'] /= 2.
         best_val_loss.append(val_loss2)
 

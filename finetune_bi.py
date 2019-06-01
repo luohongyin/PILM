@@ -55,6 +55,8 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default=randomhash+'.pt',
                     help='path to save the final model')
+parser.add_argument('--theta', type=float, default=0.002,
+                    help='theta makes the model learn skip-word dependency in decoding (theta = 0 means no regularization)')
 parser.add_argument('--alpha', type=float, default=2,
                     help='alpha L2 regularization on RNN activation (alpha = 0 means no regularization)')
 parser.add_argument('--beta', type=float, default=1,
@@ -88,10 +90,12 @@ test_data = batchify(corpus.test, test_batch_size, args)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
-model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
+model_lm = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
+model_r = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
 if args.cuda:
-    model.cuda()
-total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
+    model_lm.cuda()
+    model_r.cuda()
+total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model_lm.parameters())
 print('Args:', args)
 print('Model total parameters:', total_params)
 
@@ -104,14 +108,14 @@ criterion = nn.CrossEntropyLoss()
 def evaluate(data_source, batch_size=10):
     # Turn on evaluation mode which disables dropout.
     if args.model == 'QRNN': model.reset()
-    model.eval()
+    model_lm.eval()
     total_loss = 0
     ntokens = len(corpus.dictionary)
-    hidden = model.init_hidden(batch_size)
+    hidden = model_lm.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets, _ = get_batch(data_source, i, args, evaluation=True)
-        output, hidden = model(data, hidden)
-        output = model.decoder(output)
+        output, hidden = model_lm(data, hidden)
+        output = model_lm.decoder(output)
         output_flat = output.view(-1, ntokens)
         total_loss += len(data) * criterion(output_flat, targets).data
         hidden = repackage_hidden(hidden)
@@ -124,7 +128,8 @@ def train():
     total_loss = 0
     start_time = time.time()
     ntokens = len(corpus.dictionary)
-    hidden = model.init_hidden(args.batch_size)
+    hidden = model_lm.init_hidden(args.batch_size)
+    hidden_r = model_r.init_hidden(args.batch_size)
     batch, i = 0, 0
     while i < train_data.size(0) - 1 - 1:
         bptt = args.bptt if np.random.random() < 0.95 else args.bptt / 2.
@@ -135,27 +140,42 @@ def train():
 
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
-        model.train()
-        data, targets, _ = get_batch(train_data, i, args, seq_len=seq_len)
+        model_lm.train()
+        model_r.train()
+        data, targets, targets_r = get_batch(train_data, i, args, seq_len=seq_len)
+
+        data_r = data.flip([0])
+        # targets_r = targets_r.flip([0])
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         hidden = repackage_hidden(hidden)
+        hidden_r = repackage_hidden(hidden_r)
         optimizer.zero_grad()
 
-        output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-        output = model.decoder(output)
+        output, hidden, rnn_hs, dropped_rnn_hs = model_lm(data, hidden, return_h=True)
+        output_r, hidden_r, rnn_hs_r, dropped_rnn_hs_r = model_r(data_r, hidden_r, return_h=True)
+        output = model_lm.decoder(output)
+        output_r = model_r.decoder(output_r)
         raw_loss = criterion(output.view(-1, ntokens), targets)
+        if i != 0: raw_loss += criterion(output_r.view(-1, ntokens), targets_r)
 
         loss = raw_loss
         # Activiation Regularization
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
+        loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs_r[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
+        loss = loss + sum(args.beta * (rnn_h[:-1] - rnn_h[1:]).pow(2).mean() for rnn_h in rnn_hs_r[-1:])
+
+        outputl = dropped_rnn_hs[-1][:-1]
+        outputl_r = dropped_rnn_hs_r[-1].flip([0])[1:]
+        loss = loss + args.theta * (outputl - outputl_r).pow(2).mean()
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm(model_lm.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm(model_r.parameters(), args.clip)
         optimizer.step()
 
         total_loss += raw_loss.data
@@ -176,7 +196,7 @@ def train():
 
 # Load the best saved model.
 with open('models/{}.pt'.format(args.save), 'rb') as f:
-    model,_ ,_, _, _ = torch.load(f)
+    model_lm, model_r, _, _ = torch.load(f)
 
 
 # Loop over epochs.
@@ -186,13 +206,14 @@ best_val_loss = []
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     #optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
-    optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
+    optimizer = torch.optim.ASGD(list(model_lm.parameters()) + list(model_r.parameters()),
+            lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
         if 't0' in optimizer.param_groups[0]:
             tmp = {}
-            for prm in model.parameters():
+            for prm in list(model_lm.parameters()) + list(model_r.parameters()):
                 tmp[prm] = prm.data.clone()
                 prm.data = optimizer.state[prm]['ax'].clone()
 
@@ -205,11 +226,11 @@ try:
 
             if val_loss2 < stored_loss:
                 with open(args.save, 'wb') as f:
-                    torch.save(model, f)
+                    torch.save(model_lm, f)
                 print('Saving Averaged!')
                 stored_loss = val_loss2
 
-            for prm in model.parameters():
+            for prm in list(model_lm.parameters()) + list(model_r.parameters()):
                 prm.data = tmp[prm].clone()
 
         if (len(best_val_loss)>args.nonmono and val_loss2 > min(best_val_loss[:-args.nonmono])):
@@ -217,7 +238,8 @@ try:
             break
             # import sys
             # sys.exit(1)
-            optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
+            optimizer = torch.optim.ASGD(list(model_lm.parameters()) + list(model_r.parameters()),
+                    lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
             #optimizer.param_groups[0]['lr'] /= 2.
         best_val_loss.append(val_loss2)
 
@@ -227,7 +249,7 @@ except KeyboardInterrupt:
 
 # Load the best saved model.
 with open(args.save, 'rb') as f:
-    model = torch.load(f)
+    model_lm = torch.load(f)
     
 # Run on test data.
 test_loss = evaluate(test_data, test_batch_size)

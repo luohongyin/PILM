@@ -1,2 +1,7 @@
+corpus*
+span-*
+data/*
+soft-*
+hard-*
 *.pt
 __pycache__/

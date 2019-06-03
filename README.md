@@ -4,6 +4,18 @@
 This repository contains the code used for the following paper:
 + [Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
 
+```
+@InProceedings{belinkov:2017:acl,
+  author    = {Luo, Hongyin and Jiang, Lan and Belinkov, Yonatan and Glass, James},
+  title     = {Improving Neural Language Models by Segmenting, Attending, and Predicting the Future},
+  booktitle = {Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics (ACL)},
+  month     = {July},
+  year      = {2019},
+  address   = {Florence},
+  publisher = {Association for Computational Linguistics},
+}
+```
+
 This code is based on
 + [AWD-LSTM](https://github.com/salesforce/awd-lstm-lm)
 + [Transformer-XL](https://github.com/kimiyoung/transformer-xl)

@@ -51,9 +51,3 @@ The instruction below trains a PTB model that without finetuning achieves perple
 + `python main.py --epochs 750 --data data/wikitext-2 --save WT2.pt --dropouth 0.2 --seed 1882`
 + `python finetune.py --epochs 750 --data data/wikitext-2 --save WT2.pt --dropouth 0.2 --seed 1882`
 + `python pointer.py --save WT2.pt --lambdasm 0.1279 --theta 0.662 --window 3785 --bptt 2000 --data data/wikitext-2`
-
-### Details of the LSTM optimization
-
-All the augmentations to the LSTM, including our variant of [DropConnect (Wan et al. 2013)](https://cs.nyu.edu/~wanli/dropc/dropc.pdf) termed weight dropping which adds recurrent dropout, allow for the use of NVIDIA's cuDNN LSTM implementation.
-PyTorch will automatically use the cuDNN backend if run on CUDA with cuDNN installed.
-This ensures the model is fast to train even when convergence may take many hundreds of epochs.

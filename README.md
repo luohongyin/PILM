@@ -1,36 +1,19 @@
+
 # Language Modeling with Phrase Induction
 
 This repository contains the code used for the following paper:
 + [Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
 
-This code and the README file are based on
+This code is based on
 + [AWD-LSTM](https://github.com/salesforce/awd-lstm-lm)
 + [Transformer-XL](https://github.com/kimiyoung/transformer-xl)
-
-The model comes with instructions to train:
-+ word level language models over the Penn Treebank (PTB), [WikiText-2](https://einstein.ai/research/the-wikitext-long-term-dependency-language-modeling-dataset) (WT2), and [WikiText-103](https://einstein.ai/research/the-wikitext-long-term-dependency-language-modeling-dataset) (WT103) datasets
-
-+ character level language models over the Penn Treebank (PTBC) and Hutter Prize dataset (enwik8)
-
-The model can be composed of an LSTM or a [Quasi-Recurrent Neural Network](https://github.com/salesforce/pytorch-qrnn/) (QRNN) which is two or more times faster than the cuDNN LSTM in this setup while achieving equivalent or better accuracy.
-
-+ Install PyTorch 0.4
-+ Run `getdata.sh` to acquire the Penn Treebank and WikiText-2 datasets
-+ Train the base model using `main.py`
-+ (Optionally) Finetune the model using `finetune.py`
-+ (Optionally) Apply the [continuous cache pointer](https://arxiv.org/abs/1612.04426) to the finetuned model using `pointer.py`
 
 If you use this code or our results in your research, please cite as appropriate:
 
 ## Software Requirements
 
-Python 3 and PyTorch 0.4 are required for the current codebase.
-
-Included below are hyper parameters to get equivalent or better results to those included in the original paper.
-
-If you need to use an earlier version of the codebase, the original code and hyper parameters accessible at the [PyTorch==0.1.12](https://github.com/salesforce/awd-lstm-lm/tree/PyTorch%3D%3D0.1.12) release, with Python 3 and PyTorch 0.1.12 are required.
-If you are using Anaconda, installation of PyTorch 0.1.12 can be achieved via:
-`conda install pytorch=0.1.12 -c soumith`.
++ Python 3 and PyTorch 0.4 are required for the LSTM language models for PTB and Wikitext-2.
++ Python 2 and Tensorflow 1.12.0 are required for the Transformer-XL language model on Wikitext-3.
 
 ## Experiments
 
@@ -39,15 +22,33 @@ This script collects the Mikolov pre-processed Penn Treebank and the WikiText-2 
 
 ### Word level Penn Treebank (PTB) with LSTM
 
-The instruction below trains a PTB model that without finetuning achieves perplexities of approximately `61.2` / `58.8` (validation / testing), with finetuning achieves perplexities of approximately `58.8` / `56.5`, and with the continuous cache pointer augmentation achieves perplexities of approximately `53.2` / `52.5`.
+You can train an LSTM language model on PTB using the following command. The checkpoint will be stored in ./models/
+```
+./train_span.sh MODEL_FILE_NAME
+```
+You will get a language model achieving perplexities of approximately 59.6 / 57.5 running this.
 
-+ `python main.py --batch_size 20 --data data/penn --dropouti 0.4 --dropouth 0.25 --seed 141 --epoch 500 --save PTB.pt`
-+ `python finetune.py --batch_size 20 --data data/penn --dropouti 0.4 --dropouth 0.25 --seed 141 --epoch 500 --save PTB.pt`
-+ `python pointer.py --data data/penn --save PTB.pt --lambdasm 0.1 --theta 1.0 --window 500 --bptt 5000`
+The finetuning process can be done with the following command,
+```
+./finetune_ptb.sh MODEL_FILE_NAME
+```
+The finetuning process can produce a language model achieves 57.8 / 55.7 perplexities.
 
 ### Word level WikiText-2 (WT2) with LSTM
-The instruction below trains a PTB model that without finetuning achieves perplexities of approximately `68.7` / `65.6` (validation / testing), with finetuning achieves perplexities of approximately `67.4` / `64.7`, and with the continuous cache pointer augmentation achieves perplexities of approximately `52.2` / `50.6`.
 
-+ `python main.py --epochs 750 --data data/wikitext-2 --save WT2.pt --dropouth 0.2 --seed 1882`
-+ `python finetune.py --epochs 750 --data data/wikitext-2 --save WT2.pt --dropouth 0.2 --seed 1882`
-+ `python pointer.py --save WT2.pt --lambdasm 0.1279 --theta 0.662 --window 3785 --bptt 2000 --data data/wikitext-2`
+You can train an LSTM language model on WT2 using the following command. The checkpoint will be stored in ./models/
+```
+./train_span_wt2.sh MODEL_FILE_NAME
+```
+You will get a language model achieving perplexities of approximately 68.4 / 65.2 running this.
+
+The finetuning process can be done with the following command,
+```
+./finetune_ptb.sh MODEL_FILE_NAME
+```
+The finetuning process can produce a language model achieves 66.9 / 64.1 perplexities.
+
+### Word level WikiText-103 (WT103) with Transformer-XL
+
+CODE COMING SOON
+Download the pretrained Transformer-XL + Phrase Induction model [here](https://drive.google.com/open?id=1aySA0MYa3oqHYycXhXjYGUZKnYdXphOM) to reproduce the 17.4 perplexity on the test set of WT103.

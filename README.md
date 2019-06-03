@@ -2,6 +2,7 @@
 
 This repository contains the code used for the following paper:
 + [Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
+
 This code and the README file are based on
 + [AWD-LSTM](https://github.com/salesforce/awd-lstm-lm)
 + [Transformer-XL](https://github.com/kimiyoung/transformer-xl)

@@ -2,7 +2,7 @@
 # Language Modeling with Phrase Induction
 
 This repository contains the code used for the following paper:
-+ [Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
+[Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
 
 ```
 @InProceedings{belinkov:2017:acl,

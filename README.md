@@ -6,7 +6,7 @@ This repository contains the code used for the following paper:
 [Improving Neural Language Models by Segmenting, Attending, and Predicting the Future](#)
 
 ```
-@InProceedings{belinkov:2017:acl,
+@InProceedings{Luo2019ACL,
   author    = {Luo, Hongyin and Jiang, Lan and Belinkov, Yonatan and Glass, James},
   title     = {Improving Neural Language Models by Segmenting, Attending, and Predicting the Future},
   booktitle = {Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics (ACL)},

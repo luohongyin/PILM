@@ -57,7 +57,7 @@ You will get a language model achieving perplexities of approximately 68.4 / 65.
 
 The finetuning process can be done with the following command,
 ```
-./finetune_ptb.sh MODEL_FILE_NAME
+./finetune_wt2.sh MODEL_FILE_NAME
 ```
 The finetuning process can produce a language model achieves 66.9 / 64.1 perplexities.
 

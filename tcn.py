@@ -115,7 +115,7 @@ class TCN(nn.Module):
         
         # Linear Normalize
         x_att = x_output - x_output.min() + 10
-        span_scores = span.unsqueeze(3) # * x_att.unsqueeze(0).unsqueeze(3)
+        span_scores = span.unsqueeze(3) * x_att.unsqueeze(0).unsqueeze(3)
         # span_scores *= (1 - ones.triu(10)).unsqueeze(0).unsqueeze(3)
         if seq_len == seq_len_data:
             seq_len_data -= 1
